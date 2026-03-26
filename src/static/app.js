@@ -44,6 +44,9 @@ document.addEventListener("DOMContentLoaded", () => {
   // Authentication state
   let currentUser = null;
 
+  // Flag to run the shared-activity highlight only on initial page load
+  let initialLoadDone = false;
+
   // Time range mappings for the dropdown
   const timeRanges = {
     morning: { start: "06:00", end: "08:00" }, // Before school hours
@@ -470,6 +473,100 @@ document.addEventListener("DOMContentLoaded", () => {
     Object.entries(filteredActivities).forEach(([name, details]) => {
       renderActivityCard(name, details);
     });
+
+    // On the very first load, highlight an activity shared via URL parameter
+    if (!initialLoadDone) {
+      initialLoadDone = true;
+      highlightSharedActivity();
+    }
+  }
+
+  // Highlight the activity referenced in the ?activity= URL parameter (runs once on initial load)
+  function highlightSharedActivity() {
+    const params = new URLSearchParams(window.location.search);
+    const sharedActivity = params.get("activity");
+    if (!sharedActivity) return;
+
+    const cards = activitiesList.querySelectorAll(".activity-card");
+    cards.forEach((card) => {
+      const title = card.querySelector("h4");
+      if (title && title.textContent === sharedActivity) {
+        card.scrollIntoView({ behavior: "smooth", block: "center" });
+        card.classList.add("activity-highlight");
+        setTimeout(() => card.classList.remove("activity-highlight"), 3000);
+      }
+    });
+  }
+
+  // Show a dropdown with sharing options near the share button
+  function showShareDropdown(buttonEl, name, url, text) {
+    // Close any already-open share dropdowns
+    document.querySelectorAll(".share-dropdown").forEach((d) => d.remove());
+
+    const twitterUrl =
+      `https://twitter.com/intent/tweet?text=${encodeURIComponent(text)}` +
+      `&url=${encodeURIComponent(url)}`;
+    const whatsappUrl = `https://wa.me/?text=${encodeURIComponent(text + " " + url)}`;
+
+    const dropdown = document.createElement("div");
+    dropdown.className = "share-dropdown";
+    dropdown.innerHTML = `
+      <button class="share-option share-twitter" data-url="${twitterUrl}" title="Share on X (Twitter)">𝕏 Twitter</button>
+      <button class="share-option share-whatsapp" data-url="${whatsappUrl}" title="Share on WhatsApp">💬 WhatsApp</button>
+      <button class="share-option share-copy" data-share-url="${url}" title="Copy link">🔗 Copy Link</button>
+    `;
+
+    buttonEl.parentElement.appendChild(dropdown);
+
+    dropdown.querySelector(".share-twitter").addEventListener("click", (e) => {
+      window.open(e.currentTarget.dataset.url, "_blank", "noopener,noreferrer");
+      dropdown.remove();
+    });
+
+    dropdown.querySelector(".share-whatsapp").addEventListener("click", (e) => {
+      window.open(e.currentTarget.dataset.url, "_blank", "noopener,noreferrer");
+      dropdown.remove();
+    });
+
+    dropdown.querySelector(".share-copy").addEventListener("click", (e) => {
+      navigator.clipboard.writeText(e.currentTarget.dataset.shareUrl).then(() => {
+        e.currentTarget.textContent = "✅ Copied!";
+        setTimeout(() => dropdown.remove(), 1500);
+      }).catch(() => {
+        e.currentTarget.textContent = "❌ Copy failed";
+        setTimeout(() => dropdown.remove(), 1500);
+      });
+    });
+
+    // Close dropdown when clicking outside of it
+    const closeDropdown = (e) => {
+      if (!dropdown.contains(e.target) && e.target !== buttonEl) {
+        dropdown.remove();
+        document.removeEventListener("click", closeDropdown);
+      }
+    };
+    setTimeout(() => document.addEventListener("click", closeDropdown), 0);
+  }
+
+  // Handle the Share button click for an activity card
+  function handleShare(name, details, buttonEl) {
+    const shareUrl = new URL(window.location.href);
+    shareUrl.searchParams.set("activity", name);
+    const finalUrl = shareUrl.toString();
+    const shareText = `Check out "${name}" — ${details.description}`;
+
+    if (navigator.share) {
+      navigator
+        .share({ title: name, text: shareText, url: finalUrl })
+        .catch((err) => {
+          // If this was not a user cancellation, fall back to the dropdown
+          if (err.name !== "AbortError") {
+            showShareDropdown(buttonEl, name, finalUrl, shareText);
+          }
+        });
+    } else {
+      showShareDropdown(buttonEl, name, finalUrl, shareText);
+    }
   }
 
   // Function to render a single activity card
@@ -553,6 +650,7 @@ document.addEventListener("DOMContentLoaded", () => {
         </ul>
       </div>
       <div class="activity-card-actions">
+        <button class="share-button" title="Share this activity">🔗 Share</button>
         ${
           currentUser
             ? `
@@ -586,6 +684,12 @@ document.addEventListener("DOMContentLoaded", () => {
         });
       }
     }
+
+    // Add click handler for the share button
+    const shareButton = activityCard.querySelector(".share-button");
+    shareButton.addEventListener("click", () => {
+      handleShare(name, details, shareButton);
+    });
 
     activitiesList.appendChild(activityCard);
   }
